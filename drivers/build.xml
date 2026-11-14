@@ -28,6 +28,7 @@
   <object source="generic_hub.c" condition="USB_HUB"/>
   <object source="usbhub.c" condition="USB_HUB"/>
   <object source="usbmsc.c" condition="USB_MSC"/>
+  <object source="usbehci.c" condition="DRIVER_USB_EHCI"/>
   <object source="usbohci.c" condition="DRIVER_USB"/>
   <object source="usbohci_rh.c" condition="DRIVER_USB"/>
   <object source="lsi.c" condition="DRIVER_LSI_53C810"/>

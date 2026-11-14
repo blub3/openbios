@@ -102,7 +102,7 @@ macosx_patch(void)
     int             mkext_valid;
     unsigned long   prop[2];
     char            mkext_name[32];
-    char            mkext_path[32];
+    char            mkext_path[64];
     void            *new_dt;
     unsigned long   new_dt_length;
     phandle_t       ph;
@@ -138,34 +138,51 @@ macosx_patch(void)
     // Search partitions until the MKEXT is found.
     //
     mkext_valid = 0;
-    for (uint32_t i = 0; i < 10; i++) {
-        snprintf(mkext_path, sizeof (mkext_path), "ud:%u,\\%s", i, MKEXT_FILENAME);
-        printk("Checking for mkext at %s\n", mkext_path);
-        ph = obp_devopen(mkext_path);
-        if (ph == 0)
-            continue;
-
-        printk("Trying mkext at %s\n", mkext_path);
-
-        ret = obp_devseek(ph, 0, 0);
-        if (ret != 0) {
-            printk("Failed to seek mkext\n");
+    for (unsigned int disk = 0; disk < 256 && !mkext_valid; disk++) {
+        char alias[24];
+        if (!disk)
+            snprintf(alias, sizeof(alias), "ud");
+        else
+            snprintf(alias, sizeof(alias), "ud%u", disk - 1);
+        if (!get_property(find_dev("/aliases"), alias, NULL)) {
+            if (disk) break;
             continue;
         }
+        for (uint32_t i = 0; i < 10; i++) {
+            snprintf(mkext_path, sizeof (mkext_path), "%s:%u,\\%s", alias, i, MKEXT_FILENAME);
+            printk("Checking for mkext at %s\n", mkext_path);
+            ph = obp_devopen(mkext_path);
+            if (ph == 0)
+                continue;
 
-        ret = obp_devread(ph, (char*)&mkext, sizeof (mkext));
-        if (ret != sizeof (mkext)) {
-            printk("Failed to read mkext header\n");
-            continue;
+            printk("Trying mkext at %s\n", mkext_path);
+
+            ret = obp_devseek(ph, 0, 0);
+            if (ret != 0) {
+                printk("Failed to seek mkext\n");
+                PUSH(ph);
+                fword("close-dev");
+                continue;
+            }
+
+            ret = obp_devread(ph, (char*)&mkext, sizeof (mkext));
+            if (ret != sizeof (mkext)) {
+                printk("Failed to read mkext header\n");
+                PUSH(ph);
+                fword("close-dev");
+                continue;
+            }
+
+            if ((mkext.magic != MKEXT_MAGIC) || (mkext.signature != MKEXT_SIGN)) {
+                printk("Invalid mkext magic/signature\n");
+                PUSH(ph);
+                fword("close-dev");
+                continue;
+            }
+
+            mkext_valid = 1;
+            break;
         }
-
-        if ((mkext.magic != MKEXT_MAGIC) || (mkext.signature != MKEXT_SIGN)) {
-            printk("Invalid mkext magic/signature\n");
-            continue;
-        }
-
-        mkext_valid = 1;
-        break;
     }
 
     if (!mkext_valid) {

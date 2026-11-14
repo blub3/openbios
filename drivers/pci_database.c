@@ -1048,7 +1048,7 @@ static const pci_iface_t usb_iface[] = {
     },
     {
         0x20, "EHCI USB controller", NULL,
-        usb_ehci_devices, NULL, NULL,
+        usb_ehci_devices, &usb_ehci_config_cb, NULL,
     },
     {
         0x80, "misc USB controller", NULL,

@@ -92,6 +92,40 @@ variable keyboard-phandle 0 keyboard-phandle !
   device-end
 ;
 
+\ Boot the tested SSD directly, without relying on HFS blessing metadata.
+\ Keep the boot stick and SSD in their tested ports (SSD alias ud1).
+: mac-boot
+  0 state-valid !
+  0 !load-size
+  s" boot ud1:,\System\Library\CoreServices\BootX" evaluate
+;
+
+: xbox360-autoboot
+  cr ." Mac OS X SSD autoboot v1: press any key within 5 seconds to cancel." cr
+  d# 50 0 do
+    stdin @ if
+      key? if
+        key drop
+        ." Automatic boot cancelled. Type mac-boot to boot the SSD." cr
+        unloop exit
+      then
+    then
+    \ Bound by arch_of_init; use the Xenon timebase, not dummy Forth ticks.
+    s" xbox360-boot-wait" evaluate
+  loop
+  ['] mac-boot catch ?dup if
+    ." SSD boot exception: " . cr
+  then
+  ." SSD boot returned. Check the SSD and Xbox360.mkext boot stick." cr
+;
+
+\ Run after console setup, before initialize-of evaluates boot-command.
+\ Xbox NVRAM is RAM-only, so install these defaults on every startup.
+:noname
+  s" xbox360-autoboot" s" boot-command" $setenv
+  s" true" s" auto-boot?" $setenv
+; DIAG-initializer
+
 :noname
   set-defaults
 ; PREPOST-initializer

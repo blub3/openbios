@@ -454,9 +454,12 @@ static int usb_hid_set_layout (const char *country)
 }
 
 static void usb_hid_add_keyboard(usbdev_t *dev) {
-	char name[128];
+	char *name;
 	phandle_t aliases;
 	phandle_t dnode;
+	phandle_t saved = get_cur_dev();
+
+	activate_dev(dev->controller->node);
 
     fword("new-device");
     dnode = get_cur_dev();
@@ -468,15 +471,17 @@ static void usb_hid_add_keyboard(usbdev_t *dev) {
 	push_str("keyboard");
 	fword("device-type");
 
-	snprintf(name, sizeof(name), "%s/keyboard", get_path_from_ph(dnode));
-	usb_debug("Found keyboard at %s\n", name);
-
 	BIND_NODE_METHODS(get_cur_dev(), usb_kbd);
 
 	fword("finish-device");
+	name = get_path_from_ph(dnode);
 
 	aliases = find_dev("/aliases");
 	set_property(aliases, "keyboard", name, strlen(name) + 1);
+	printk("USB keyboard: %s (%s)\n", name,
+	       dev->speed == LOW_SPEED ? "low speed" : "full speed");
+	free(name);
+	activate_dev(saved);
 }
 
 void
@@ -521,10 +526,8 @@ usb_hid_init (usbdev_t *dev)
 			usb_hid_set_layout(countries[countrycode][1]);
 
 			// only add here, because we only support boot-keyboard HID devices
-			dev->destroy = usb_hid_destroy;
-			dev->poll = usb_hid_poll;
 			int i;
-			for (i = 0; i <= dev->num_endp; i++) {
+			for (i = 0; i < dev->num_endp; i++) {
 				if (dev->endpoints[i].endpoint == 0)
 					continue;
 				if (dev->endpoints[i].type != INTERRUPT)
@@ -533,9 +536,23 @@ usb_hid_init (usbdev_t *dev)
 					continue;
 				break;
 			}
+			if (i == dev->num_endp) {
+				printk("USB keyboard: no interrupt IN endpoint\n");
+				free(dev->data);
+				dev->data = NULL;
+				return;
+			}
 			usb_debug ("  found endpoint %x for interrupt-in\n", i);
 			/* 20 buffers of 8 bytes, for every 10 msecs */
 			HID_INST(dev)->queue = dev->controller->create_intr_queue (&dev->endpoints[i], 8, 20, 10);
+			if (!HID_INST(dev)->queue) {
+				printk("USB keyboard: interrupt queue allocation failed\n");
+				free(dev->data);
+				dev->data = NULL;
+				return;
+			}
+			dev->destroy = usb_hid_destroy;
+			dev->poll = usb_hid_poll;
 			keycount = 0;
 			usb_debug ("  configuration done.\n");
 			usb_hid_add_keyboard(dev);

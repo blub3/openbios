@@ -26,6 +26,7 @@
 #include "libopenbios/bindings.h"
 #include "libopenbios/console.h"
 #include "drivers/pci.h"
+#include "drivers/usb.h"
 #include "arch/common/nvram.h"
 #include "drivers/drivers.h"
 #include "xbox360/xbox360.h"
@@ -39,7 +40,7 @@
 #include "../../drivers/timer.h" // TODO
 
 
-extern void unexpected_excep(int vector);
+extern void unexpected_excep(int vector, unsigned long nip, unsigned long status);
 
 static inline uint64_t
 in_be64(volatile uint64_t *addr)
@@ -69,11 +70,10 @@ out_be64(volatile uint64_t *addr, uint64_t val)
 }
 
 void
-unexpected_excep(int vector)
+unexpected_excep(int vector, unsigned long nip, unsigned long status)
 {
-    unsigned long nip;
-    asm volatile("mfsrr0 %0" : "=r" (nip) : );
-    printk("openbios panic: Unexpected exception %x at %lx\n", vector, nip);
+    printk("openbios panic: Unexpected exception %x at %lx SRR1=%lx\n",
+           vector, nip, status);
     for (;;) {
     }
 }
@@ -441,20 +441,89 @@ dma_sync(void)
     flush_icache_range(cell2pointer(virt), cell2pointer(virt + size));
 }
 
+/* EHCI operational offsets are relative to CAPLENGTH, not the BAR. */
+#define EHCI_USBCMD       0x00
+#define EHCI_USBSTS       0x04
+#define EHCI_CONFIGFLAG   0x40
+#define EHCI_PORTSC       0x44
+#define EHCI_TIMEOUT_MS   1000
+
+static uint32_t
+ehci_read(uint32_t base, unsigned int offset)
+{
+    return in_le32((volatile unsigned int *)(base + offset));
+}
+
+static int
+ehci_wait(uint32_t base, unsigned int offset, uint32_t mask,
+          uint32_t expected)
+{
+    unsigned int elapsed;
+
+    for (elapsed = 0; elapsed < EHCI_TIMEOUT_MS; elapsed++) {
+        if ((ehci_read(base, offset) & mask) == expected)
+            return 0;
+        mdelay(1);
+    }
+    return -1;
+}
+
+static void
+ehci_dump(uint32_t addr, uint32_t op, unsigned int ports,
+          const char *stage)
+{
+    unsigned int port;
+
+    printk("EHCI %08x %s: CMD=%08x STS=%08x CF=%08x\n",
+           addr, stage, ehci_read(op, EHCI_USBCMD),
+           ehci_read(op, EHCI_USBSTS), ehci_read(op, EHCI_CONFIGFLAG));
+    for (port = 0; port < ports; port++) {
+        uint32_t status = ehci_read(op, EHCI_PORTSC + 4 * port);
+        printk("  port %u: PORTSC=%08x connected=%u enabled=%u owner=%s\n",
+               port + 1, status, status & 1, (status >> 2) & 1,
+               (status & (1 << 13)) ? "OHCI" : "EHCI");
+    }
+}
+
 static void
 ehci_disable(uint32_t addr)
 {
-    // Stop EHCI controller and wait for halt bit to be set.
-    out_le32((volatile unsigned int*)(addr + 0x20), in_le32((volatile unsigned int*)(addr + 0x20)) & ~(0x1));
-    while ((in_le32((volatile unsigned int*)(addr + 0x24)) & (1 << 12)) == 0) {
-        mdelay(1);
+    uint32_t cap = ehci_read(addr, 0);
+    unsigned int length = cap & 0xff;
+    unsigned int ports;
+    uint32_t op;
+
+    /* Reject an absent BAR or an invalid operational register offset. */
+    if (cap == 0xffffffff || length < 0x10 || (length & 3)) {
+        printk("EHCI %08x: invalid capability register %08x\n", addr, cap);
+        return;
+    }
+    ports = ehci_read(addr, 4) & 0xf;
+    op = addr + length;
+    ehci_dump(addr, op, ports, "before reset");
+
+    out_le32((volatile unsigned int *)(op + EHCI_USBCMD),
+             ehci_read(op, EHCI_USBCMD) & ~1U);
+    if (ehci_wait(op, EHCI_USBSTS, 1 << 12, 1 << 12)) {
+        printk("EHCI %08x: halt timed out; skipping reset\n", addr);
+        ehci_dump(addr, op, ports, "halt timeout");
+        return;
     }
 
-    // Reset the controller and wait for reset to complete.
-    out_le32((volatile unsigned int*)(addr + 0x20), in_le32((volatile unsigned int*)(addr + 0x20)) | 0x2);
-    while (in_le32((volatile unsigned int*)(addr + 0x20)) & 0x2) {
-        mdelay(1);
+    out_le32((volatile unsigned int *)(op + EHCI_USBCMD),
+             ehci_read(op, EHCI_USBCMD) | 2);
+    if (ehci_wait(op, EHCI_USBCMD, 2, 0)) {
+        printk("EHCI %08x: reset timed out\n", addr);
+        ehci_dump(addr, op, ports, "reset timeout");
+        return;
     }
+    ehci_dump(addr, op, ports, "after reset");
+}
+
+/* The generic Forth ms word uses dummy ticks on this platform. */
+static void xbox360_boot_wait(void)
+{
+    mdelay(100);
 }
 
 void
@@ -541,7 +610,7 @@ arch_of_init(void)
 
     fword("activate-tty-interface");
 
-    // Disable EHCI controllers to use OHCI only.
+    // Quiesce inherited EHCI state before PCI setup.
     ehci_disable(0xEA003000);
     ehci_disable(0xEA005000);
 
@@ -550,6 +619,9 @@ arch_of_init(void)
     fword("find-device");
     feval("\" /\" open-dev to my-self");
     ob_pci_init();
+#ifdef CONFIG_DRIVER_USB_EHCI
+    ob_usb_init_pending();
+#endif
     feval("0 to my-self");
 
     for (int i = 0; i < 0x10; i++) {
@@ -576,6 +648,7 @@ arch_of_init(void)
 
     bind_func("platform-boot", boot);
     bind_func("(arch-go)", arch_go);
+    bind_func("xbox360-boot-wait", xbox360_boot_wait);
 
     /* Allocate 8MB memory at load-base */
     fword("load-base");

@@ -1211,12 +1211,65 @@ int i82378_config_cb(const pci_config_t *config)
     return 0;
 }
 
+#ifdef CONFIG_DRIVER_USB_EHCI
+/* Discover all PCI functions before assigning ports and enumerating devices. */
+static struct {
+    pci_addr addr;
+    phandle_t node;
+    int ehci;
+} pending_usb[8];
+static unsigned int pending_usb_count;
+
+static void queue_usb(const pci_config_t *config, int ehci)
+{
+    if (pending_usb_count == sizeof(pending_usb) / sizeof(pending_usb[0])) {
+        printk("USB: too many controllers\n");
+        return;
+    }
+    pending_usb[pending_usb_count].addr = PCI_ADDR(
+        PCI_BUS(config->dev), PCI_DEV(config->dev), PCI_FN(config->dev));
+    pending_usb[pending_usb_count].node = get_cur_dev();
+    pending_usb[pending_usb_count++].ehci = ehci;
+}
+
+void ob_usb_init_pending(void)
+{
+    phandle_t saved = get_cur_dev();
+    unsigned int i;
+    int ehci;
+    printk("USB startup v3 (OHCI class fallback): %u queued controllers\n", pending_usb_count);
+    for (ehci = 1; ehci >= 0; ehci--) {
+        for (i = 0; i < pending_usb_count; i++) {
+            if (pending_usb[i].ehci != ehci) continue;
+            printk("USB starting %s PCI %08x\n", ehci ? "EHCI" : "OHCI",
+                   pending_usb[i].addr);
+            activate_dev(pending_usb[i].node);
+            if (ehci)
+                ob_usb_ehci_init(get_path_from_ph(pending_usb[i].node), pending_usb[i].addr);
+            else
+                ob_usb_ohci_init(get_path_from_ph(pending_usb[i].node), pending_usb[i].addr);
+        }
+    }
+    pending_usb_count = 0;
+    activate_dev(saved);
+}
+#endif
+
+int usb_ehci_config_cb(const pci_config_t *config)
+{
+#ifdef CONFIG_DRIVER_USB_EHCI
+    queue_usb(config, 1);
+#endif
+    return 0;
+}
+
 int usb_ohci_config_cb(const pci_config_t *config)
 {
-#ifdef CONFIG_DRIVER_USB
+#ifdef CONFIG_DRIVER_USB_EHCI
+    queue_usb(config, 0);
+#elif defined(CONFIG_DRIVER_USB)
     pci_addr addr = PCI_ADDR(
         PCI_BUS(config->dev), PCI_DEV(config->dev), PCI_FN(config->dev));
-
     ob_usb_ohci_init(config->path, addr);
 #endif
     return 0;

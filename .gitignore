@@ -1,3 +1,8 @@
 obj-*
 .stgit-*
 config-host.mak
+
+# Generated bootstrap dictionary and Python host-test caches
+/bootstrap.dict
+__pycache__/
+*.pyc

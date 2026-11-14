@@ -34,6 +34,7 @@
 #ifndef __USB_H
 #define __USB_H
 #include <drivers/pci.h>
+#include "libopenbios/bindings.h"
 
 typedef enum { host_to_device = 0, device_to_host = 1 } dev_req_dir;
 typedef enum { standard_type = 0, class_type = 1, vendor_type =
@@ -196,6 +197,7 @@ typedef enum { OHCI = 0, UHCI = 1, EHCI = 2, XHCI = 3} hc_type;
 
 struct usbdev_hc {
 	hci_t *next;
+	phandle_t node; /* Controller device-tree parent for late enumeration. */
 	u32 reg_base;
 	hc_type type;
 	usbdev_t *devices[128];	// dev 0 is root hub, 127 is last addressable

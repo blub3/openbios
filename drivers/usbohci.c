@@ -202,6 +202,10 @@ ohci_init (void *bar)
 
 	controller->reg_base = (u32)(unsigned long)bar;
 	OHCI_INST (controller)->opreg = (opreg_t*)phys_to_virt(controller->reg_base);
+	printk("OHCI %08x inherited: REV=%08x CTRL=%08x RHA=%08x\n",
+	       controller->reg_base, READ_OPREG(OHCI_INST(controller), HcRevision),
+	       READ_OPREG(OHCI_INST(controller), HcControl),
+	       READ_OPREG(OHCI_INST(controller), HcRhDescriptorA));
 	usb_debug("OHCI Version %x.%x\n",
 		  (READ_OPREG(OHCI_INST(controller), HcRevision) >> 4) & 0xf,
 		  READ_OPREG(OHCI_INST(controller), HcRevision) & 0xf);
@@ -267,6 +271,10 @@ ohci_init (void *bar)
 
 	mdelay(100);
 
+	printk("OHCI %08x operational: CTRL=%08x RHA=%08x STS=%08x\n",
+	       controller->reg_base, READ_OPREG(OHCI_INST(controller), HcControl),
+	       READ_OPREG(OHCI_INST(controller), HcRhDescriptorA),
+	       READ_OPREG(OHCI_INST(controller), HcInterruptStatus));
 	controller->devices[0]->controller = controller;
 	controller->devices[0]->init = ohci_rh_init;
 	controller->devices[0]->init (controller->devices[0]);
@@ -287,6 +295,8 @@ ohci_pci_init (pci_addr addr)
 	 * BASE ADDRESS only [31-12] bits. All other usually 0, but not all.
 	 * OHCI mandates MMIO, so bit 0 is clear */
 	reg_base = pci_config_read32 (addr, PCI_BASE_ADDR_0) & 0xfffff000;
+	printk("OHCI PCI %08x: BAR=%08x COMMAND=%04x\n", addr, reg_base,
+	       pci_config_read16(addr, PCI_COMMAND));
 
 	return ohci_init((void *)(unsigned long)reg_base);
 }

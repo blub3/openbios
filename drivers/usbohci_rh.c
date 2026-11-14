@@ -124,12 +124,19 @@ ohci_rh_scanport (usbdev_t *dev, int port)
 	mdelay(100); // wait for signal to stabilize
 
 	if (!(READ_OPREG(OHCI_INST(dev->controller), HcRhPortStatus[port]) & PortEnableStatus)) {
-		usb_debug ("port enable failed\n");
+		printk("OHCI %08x port %d: enable failed, status=%08x\n",
+                       dev->controller->reg_base, port + 1,
+                       READ_OPREG(OHCI_INST(dev->controller), HcRhPortStatus[port]));
 		return;
 	}
 
 	int speed = (READ_OPREG(OHCI_INST(dev->controller), HcRhPortStatus[port]) & LowSpeedDeviceAttached) != 0;
+	printk("OHCI %08x port %d: %s-speed device\n",
+	       dev->controller->reg_base, port + 1, speed ? "low" : "full");
 	RH_INST (dev)->port[port] = usb_attach_device(dev->controller, dev->address, port, speed);
+        if (RH_INST(dev)->port[port] < 0)
+                printk("OHCI %08x port %d: enumeration failed (speed=%d)\n",
+                       dev->controller->reg_base, port + 1, speed);
 }
 
 static int
@@ -184,9 +191,6 @@ ohci_rh_init (usbdev_t *dev)
 {
 	int i;
 
-	dev->destroy = ohci_rh_destroy;
-	dev->poll = ohci_rh_poll;
-
 	dev->data = malloc (sizeof (rh_inst_t));
 	if (!dev->data) {
 		printk("Not enough memory for OHCI RH.\n");
@@ -195,10 +199,18 @@ ohci_rh_init (usbdev_t *dev)
 
 	RH_INST (dev)->numports = READ_OPREG(OHCI_INST(dev->controller), HcRhDescriptorA) & NumberDownstreamPortsMask;
 	RH_INST (dev)->port = malloc(sizeof(int) * RH_INST (dev)->numports);
+	if (!RH_INST(dev)->port) {
+		printk("Not enough memory for OHCI RH ports.\n");
+		free(dev->data);
+		dev->data = NULL;
+		return;
+	}
+	dev->destroy = ohci_rh_destroy;
+	dev->poll = ohci_rh_poll;
 	usb_debug("%d ports registered\n", RH_INST (dev)->numports);
+	printk("OHCI root hub: %d ports\n", RH_INST(dev)->numports);
 
 	for (i = 0; i < RH_INST (dev)->numports; i++) {
-		ohci_rh_enable_port (dev, i);
 		RH_INST (dev)->port[i] = -1;
 	}
 
@@ -207,6 +219,16 @@ ohci_rh_init (usbdev_t *dev)
 	dev->address = 0;
 	dev->hub = -1;
 	dev->port = -1;
+
+	/* EHCI can hand a device over before OHCI clears its interrupt status.
+	 * Discover existing connections without requiring a fresh RHSC event.
+	 * Initialize every port slot first, before attaching any child device.
+	 */
+	for (i = 0; i < RH_INST(dev)->numports; i++) {
+		printk("OHCI port %d initial status=%08x\n", i + 1,
+		       READ_OPREG(OHCI_INST(dev->controller), HcRhPortStatus[i]));
+		ohci_rh_scanport(dev, i);
+	}
 
 	usb_debug("rh init done\n");
 }

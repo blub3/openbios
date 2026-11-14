@@ -175,7 +175,7 @@ initialize_luns(usbdev_t *dev)
 	dr.bRequest = GET_MAX_LUN;
 	dr.wValue = 0;
 	dr.wIndex = 0;
-	dr.wLength = 1;
+	dr.wLength = __cpu_to_le16(1);
 	if (MSC_INST(dev)->quirks & USB_MSC_QUIRK_NO_LUNS ||
 	    dev->controller->control(dev, IN, sizeof(dr), &dr,
 			sizeof(msc->num_luns), &msc->num_luns) < 0)
@@ -510,15 +510,19 @@ read_capacity(usbdev_t *dev)
 		}
 		break;
 	}
-	if (count >= 20) {
-		// still not successful, assume 2tb in 512byte sectors, which is just the same garbage as any other number, but probably more usable.
-		usb_debug("  assuming 2 TB with 512-byte sectors as READ CAPACITY didn't answer.\n");
-		MSC_INST(dev)->numblocks = 0xffffffff;
-		MSC_INST(dev)->blocksize = 512;
+	if (ret != MSC_COMMAND_OK) {
+		printk("USB storage: READ CAPACITY failed\n");
+		return MSC_COMMAND_FAIL;
 	} else {
-		MSC_INST(dev)->numblocks = MIN(__be32_to_cpu(buf[0]), UINT_MAX - 1) + 1;
+		if (__be32_to_cpu(buf[0]) == UINT_MAX) {
+			printk("USB storage: READ CAPACITY(16) required; disk unsupported\n");
+			return MSC_COMMAND_FAIL;
+		}
+		MSC_INST(dev)->numblocks = __be32_to_cpu(buf[0]) + 1;
 		MSC_INST(dev)->blocksize = __be32_to_cpu(buf[1]);
 	}
+	if (!MSC_INST(dev)->blocksize || MSC_INST(dev)->blocksize > MAX_CHUNK_BYTES)
+		return MSC_COMMAND_FAIL;
 	usb_debug("  %u %u-byte sectors (%u MB)\n", MSC_INST(dev)->numblocks,
 		MSC_INST(dev)->blocksize,
 		/* round down high block counts to avoid integer overflow */
@@ -587,8 +591,10 @@ usb_msc_test_unit_ready(usbdev_t *dev)
 	}
 	usb_debug("\n");
 
-	if (read_capacity(dev) == MSC_COMMAND_DETACHED)
-		return USB_MSC_DETACHED;
+	if (read_capacity(dev) != MSC_COMMAND_OK) {
+		MSC_INST(dev)->ready = USB_MSC_NOT_READY;
+		return USB_MSC_NOT_READY;
+	}
 
 	return MSC_INST(dev)->ready;
 }
@@ -707,27 +713,59 @@ NODE_METHODS(ob_usbmsc) = {
 
 static void set_ud_alias(const char *path)
 {
-    phandle_t aliases;
+    static unsigned int disk_index;
+    phandle_t aliases = find_dev("/aliases");
+    char alias[24];
 
-    aliases = find_dev("/aliases");
+    snprintf(alias, sizeof(alias), "ud%u", disk_index++);
+    set_property(aliases, alias, path, strlen(path) + 1);
+    if (!get_property(aliases, "ud", NULL))
+        set_property(aliases, "ud", path, strlen(path) + 1);
+    printk("USB disk %s: %s\n", alias, path);
+}
 
-    if (get_property(aliases, "ud", NULL))
-        return;
-
-    set_property(aliases, "ud", path, strlen(path) + 1);
+static void usb_msc_identify(usbdev_t *dev, phandle_t node)
+{
+    u8 inquiry[36] = { 0 };
+    u8 command[6] = { 0x12, 0, 0, 0, sizeof(inquiry), 0 };
+    char model[25] = "unknown";
+    const char *speed = dev->speed == HIGH_SPEED ? "480 Mbit/s (high)" :
+                        dev->speed == FULL_SPEED ? "12 Mbit/s (full)" :
+                        dev->speed == LOW_SPEED ? "1.5 Mbit/s (low)" : "unknown";
+    unsigned int i;
+    if (execute_command(dev, cbw_direction_data_in, command, sizeof(command),
+                        inquiry, sizeof(inquiry), 0) == MSC_COMMAND_OK) {
+        for (i = 0; i < 24; i++)
+            model[i] = inquiry[8 + i] >= 32 && inquiry[8 + i] < 127 ?
+                       inquiry[8 + i] : ' ';
+        model[24] = 0;
+        for (i = 24; i && model[i - 1] == ' '; i--)
+            model[i - 1] = 0;
+    }
+    set_property(node, "model", model, strlen(model) + 1);
+    set_int_property(node, "usb-address", dev->address);
+    set_int_property(node, "usb-speed-kbps", dev->speed == HIGH_SPEED ? 480000 :
+                     dev->speed == LOW_SPEED ? 1500 : 12000);
+    printk("USB storage: %s, %u MiB, %u-byte sectors, %s, %s address %d\n",
+           model, (unsigned int)(((uint64_t)MSC_INST(dev)->numblocks *
+                   MSC_INST(dev)->blocksize) >> 20), MSC_INST(dev)->blocksize,
+           speed, dev->controller->type == EHCI ? "EHCI" : "OHCI", dev->address);
 }
 
 static void
 usb_msc_create_disk(usbdev_t *dev)
 {
 	phandle_t dnode;
+    phandle_t saved = get_cur_dev();
+    activate_dev(dev->controller->node);
 
 	//
     // Create the disk device.
     //
     fword("new-device");
     dnode = get_cur_dev();
-    set_int_property(dnode, "reg", 0);
+    set_int_property(dnode, "reg", dev->address);
+    usb_msc_identify(dev, dnode);
 
     push_str("disk");
     fword("device-name");
@@ -746,6 +784,7 @@ usb_msc_create_disk(usbdev_t *dev)
 	set_ud_alias(get_path_from_ph(dnode));
 
 	MSC_INST(dev)->usbdisk_created = 1;
+    activate_dev(saved);
 }
 
 static void
@@ -819,7 +858,7 @@ void usb_msc_force_init(usbdev_t *dev, u32 quirks)
 	MSC_INST(dev)->usbdisk_created = 0;
 	MSC_INST(dev)->quirks = quirks;
 
-	for (i = 1; i <= dev->num_endp; i++) {
+	for (i = 1; i < dev->num_endp; i++) {
 		if (dev->endpoints[i].endpoint == 0)
 			continue;
 		if (dev->endpoints[i].type != BULK)

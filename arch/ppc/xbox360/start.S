@@ -25,14 +25,16 @@
 #define ILLEGAL_VECTOR( v )	\
     .org __vectors + v; vector__##v: \
     EXCEPTION_PREAMBLE; \
+    mfsrr0 r4; /* Preserve fault state before translation can fault again. */ \
+    mfsrr1 r5; \
     mfmsr   r3 ; \
 	clrldi  r3, r3, 1; /* Disable SF */ \
 	ori     r3, r3, (MSR_IR | MSR_DR); /* Enable IR and DR */ \
 	mtmsrd  r3; \
     isync; \
     li r3, v; \
-    LOAD_REG_FUNC(r4, unexpected_excep); \
-    mtctr r4; \
+    LOAD_REG_FUNC(r6, unexpected_excep); \
+    mtctr r6; \
     bctr
 
 #define VECTOR( v, dummystr )	.org __vectors + v ; vector__##v

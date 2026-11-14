@@ -40,6 +40,7 @@ extern int bridge_config_cb(const pci_config_t *config);
 extern int simba_config_cb(const pci_config_t *config);
 extern int ebus_config_cb(const pci_config_t *config);
 extern int i82378_config_cb(const pci_config_t *config);
+extern int usb_ehci_config_cb(const pci_config_t *config);
 extern int usb_ohci_config_cb(const pci_config_t *config);
 extern int rtl8139_config_cb(const pci_config_t *config);
 extern int sungem_config_cb (const pci_config_t *config);

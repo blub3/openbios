@@ -72,6 +72,8 @@ new_controller (void)
 	hci_t *controller = malloc (sizeof (hci_t));
 
 	if (controller) {
+		memset(controller, 0, sizeof(*controller));
+		controller->node = get_cur_dev();
 		/* atomic */
 		controller->next = usb_hcs;
 		usb_hcs = controller;
@@ -138,6 +140,9 @@ init_device_entry (hci_t *controller, int i)
 	if (controller->devices[i] != 0)
 		usb_debug("warning: device %d reassigned?\n", i);
 	controller->devices[i] = malloc(sizeof(usbdev_t));
+	if (!controller->devices[i])
+		panic("USB device allocation failed");
+	memset(controller->devices[i], 0, sizeof(usbdev_t));
 	controller->devices[i]->controller = controller;
 	controller->devices[i]->address = -1;
 	controller->devices[i]->hub = -1;
@@ -178,7 +183,7 @@ u8 *
 get_descriptor (usbdev_t *dev, unsigned char bmRequestType, int descType,
 		int descIdx, int langID)
 {
-	device_descriptor_t dd;
+	device_descriptor_t dd = { 0 };
 	u8 *result;
 	dev_req_t dr;
 	int size;
@@ -192,6 +197,7 @@ get_descriptor (usbdev_t *dev, unsigned char bmRequestType, int descType,
 	if (dev->controller->control (dev, IN, sizeof (dr), &dr, 8, (u8 *)&dd)) {
 		usb_debug ("getting descriptor size (type %x) failed\n",
 			descType);
+		return NULL;
 	}
 
 	if (descType == 1) {
@@ -203,20 +209,33 @@ get_descriptor (usbdev_t *dev, unsigned char bmRequestType, int descType,
 	/* special case for configuration descriptors: they carry all their
 	   subsequent descriptors with them, and keep the entire size at a
 	   different location */
+	if (dd.bDescriptorType != descType) return NULL;
 	size = dd.bLength;
 	if (dd.bDescriptorType == 2) {
 		int realsize = __le16_to_cpu(dd.bcdUSB);
 		size = realsize;
 	}
+	if (size < 2 || (descType == 1 && size < sizeof(device_descriptor_t)) ||
+	    (descType == 2 && size < sizeof(configuration_descriptor_t)))
+		return NULL;
 	result = malloc (size);
+	if (!result) return NULL;
 	memset (result, 0, size);
 	dr.wLength = __cpu_to_le16(size);
 	if (dev->controller->
 	    control (dev, IN, sizeof (dr), &dr, size, result)) {
 		usb_debug ("getting descriptor (type %x, size %x) failed\n",
 			descType, size);
+		free(result);
+		return NULL;
 	}
 
+    if (result[0] < 2 || result[0] > size || result[1] != descType ||
+        (descType == 2 && (__le16_to_cpu(((configuration_descriptor_t *)result)->wTotalLength) > size ||
+                           __le16_to_cpu(((configuration_descriptor_t *)result)->wTotalLength) < sizeof(configuration_descriptor_t)))) {
+        free(result);
+        return NULL;
+    }
 	return result;
 }
 
@@ -277,6 +296,7 @@ int
 generic_set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 {
 	int adr = get_free_address (controller);	// address to set
+	if (adr < 0) return -1;
 	dev_req_t dr;
 
 	memset (&dr, 0, sizeof (dr));
@@ -297,11 +317,12 @@ generic_set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 	dev->speed = speed;
 	dev->endpoints[0].dev = dev;
 	dev->endpoints[0].endpoint = 0;
-	dev->endpoints[0].maxpacketsize = 8;
+	dev->endpoints[0].maxpacketsize = speed == HIGH_SPEED ? 64 : 8;
 	dev->endpoints[0].toggle = 0;
 	dev->endpoints[0].direction = SETUP;
 	mdelay (50);
 	if (dev->controller->control (dev, OUT, sizeof (dr), &dr, 0, 0)) {
+		usb_detach_device(controller, adr);
 		return -1;
 	}
 	mdelay (50);
@@ -369,6 +390,10 @@ set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 	dev->speed = speed;
 	dev->descriptor = get_descriptor (dev, gen_bmRequestType
 		(device_to_host, standard_type, dev_recp), 1, 0, 0);
+	if (!dev->descriptor) {
+		usb_detach_device(controller, adr);
+		return -1;
+	}
 	dd = (device_descriptor_t *) dev->descriptor;
 
 	usb_debug ("* found device (0x%04x:0x%04x, USB %x.%x)",
@@ -386,7 +411,15 @@ set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 
 	dev->configuration = get_descriptor (dev, gen_bmRequestType
 		(device_to_host, standard_type, dev_recp), 2, 0, 0);
+	if (!dev->configuration) {
+		usb_detach_device(controller, adr);
+		return -1;
+	}
 	cd = (configuration_descriptor_t *) dev->configuration;
+	u8 *config_end = dev->configuration + __le16_to_cpu(cd->wTotalLength);
+	if (cd->bLength < sizeof(*cd) || !cd->bNumInterfaces ||
+	    dev->configuration + cd->bLength + sizeof(interface_descriptor_t) > config_end)
+		goto bad_configuration;
 	interface_descriptor_t *interface =
 		(interface_descriptor_t *) (((char *) cd) + cd->bLength);
 	{
@@ -407,14 +440,13 @@ set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 		}
 		for (i = 0; i < num; i++) {
 			int j;
+			if (current->bLength < sizeof(*current) || current->bDescriptorType != 4 ||
+			    current->bNumEndpoints > 31) goto bad_configuration;
 			usb_debug (" #%x has %x endpoints, interface %x:%x, protocol %x\n",
 					current->bInterfaceNumber, current->bNumEndpoints, current->bInterfaceClass, current->bInterfaceSubClass, current->bInterfaceProtocol);
 			endpoint_descriptor_t *endp =
 				(endpoint_descriptor_t *) (((char *) current)
 							   + current->bLength);
-			/* Skip any non-endpoint descriptor */
-			if (endp->bDescriptorType != 0x05)
-				endp = (endpoint_descriptor_t *)(((char *)endp) + ((char *)endp)[0]);
 
 			memset (dev->endpoints, 0, sizeof (dev->endpoints));
 			dev->num_endp = 1;	// 0 always exists
@@ -422,8 +454,16 @@ set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 			dev->endpoints[0].maxpacketsize = dd->bMaxPacketSize0;
 			dev->endpoints[0].direction = SETUP;
 			dev->endpoints[0].type = CONTROL;
-			dev->endpoints[0].interval = usb_decode_interval(dev->speed, CONTROL, endp->bInterval);
+			dev->endpoints[0].interval = 0;
 			for (j = 1; j <= current->bNumEndpoints; j++) {
+				while ((u8 *)endp + 2 <= config_end && endp->bDescriptorType != 5) {
+					if (endp->bLength < 2 || (u8 *)endp + endp->bLength > config_end)
+						goto bad_configuration;
+					endp = (void *)((u8 *)endp + endp->bLength);
+				}
+				if ((u8 *)endp + sizeof(*endp) > config_end ||
+				    endp->bLength < sizeof(*endp) || (u8 *)endp + endp->bLength > config_end)
+					goto bad_configuration;
 #ifdef CONFIG_DEBUG_USB
 				static const char *transfertypes[4] = {
 					"control", "isochronous", "bulk", "interrupt"
@@ -458,6 +498,11 @@ set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 	int class = dd->bDeviceClass;
 	if (class == 0)
 		class = interface->bInterfaceClass;
+	if (controller->type == OHCI)
+		printk("OHCI device %d: %04x:%04x class=%02x interface=%02x/%02x/%02x\n",
+		       adr, __le16_to_cpu(dd->idVendor), __le16_to_cpu(dd->idProduct),
+		       class, interface->bInterfaceClass, interface->bInterfaceSubClass,
+		       interface->bInterfaceProtocol);
 
 	usb_debug(", class: ");
 	switch (class) {
@@ -530,6 +575,10 @@ set_address (hci_t *controller, int speed, int hubport, int hubaddr)
 	}
 	controller->devices[adr]->init = usb_generic_init;
 	return adr;
+bad_configuration:
+	printk("USB address %d: invalid configuration descriptor\n", adr);
+	usb_detach_device(controller, adr);
+	return -1;
 }
 
 /*
