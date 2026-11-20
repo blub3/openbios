@@ -228,12 +228,61 @@ xbox360_poweroff(void)
     xbox360_smc_write(&msg);
 }
 
+unsigned int xbox360_video_width = 1280;
+unsigned int xbox360_video_height = 720;
+static char xbox360_scanout_info[120];
+
+static uint32_t
+xbox360_gpu_read(unsigned int reg)
+{
+    return in_be32((volatile uint32_t *)(XBOX360_GPU_BASE + reg));
+}
+
+static void
+xbox360_read_video_geometry(void)
+{
+    unsigned int width = xbox360_gpu_read(0x6134);  /* D1GRPH_X_END */
+    unsigned int height = xbox360_gpu_read(0x6138); /* D1GRPH_Y_END */
+    unsigned int pitch = xbox360_gpu_read(0x6120);  /* D1GRPH_PITCH, in pixels */
+    unsigned int htotal = xbox360_gpu_read(0x6000) & 0x1fff;
+    unsigned int vtotal = xbox360_gpu_read(0x6020) & 0x1fff;
+    unsigned int sync_b = xbox360_gpu_read(0x6010) & 0x1fff;
+    unsigned int format = xbox360_gpu_read(0x6528); /* D1MODE_DATA_FORMAT */
+    unsigned int control = xbox360_gpu_read(0x6104); /* D1GRPH_CONTROL */
+
+    /*
+     * Inherit a matching 1080p50/60 scanout. A scaled 720p surface does not
+     * qualify, even when the sink is receiving a 1080p signal.
+     */
+    if (width == 1920 && height == 1080 && pitch == width &&
+        (htotal == 2199 || htotal == 2639) &&
+        (vtotal == 1124 || sync_b == 1124) && !(format & 1) &&
+        control == 2 && xbox360_gpu_read(0x6124) == 0 &&
+        xbox360_gpu_read(0x6128) == 0 && xbox360_gpu_read(0x612c) == 0 &&
+        xbox360_gpu_read(0x6130) == 0) {
+        xbox360_video_width = width;
+        xbox360_video_height = height;
+    }
+
+    snprintf(xbox360_scanout_info, sizeof(xbox360_scanout_info),
+             "%ux%u pitch=%u htotal=%u vtotal=%u sync-b=%u format=%x control=%x",
+             width, height, pitch, htotal, vtotal, sync_b, format, control);
+}
+
+static void
+xbox360_boot_is_1080p(void)
+{
+    PUSH(xbox360_video_width == 1920 ? -1 : 0);
+}
+
 void
 entry(void)
 {
     isa_io_base = 0x80000000;
 
     arch = &xbox360_arch;
+
+    xbox360_read_video_geometry();
 
     // Switch framebuffer to new location
     out_be32((unsigned int*)(XBOX360_GPU_BASE + 0x6144), 1);
@@ -601,6 +650,7 @@ arch_of_init(void)
     setup_timers();
 
     bind_func("xenon-hdmi-audio", xbox360_hdmi_audio);
+    bind_func("xenon-boot-1080p?", xbox360_boot_is_1080p);
 
     bind_func("ppc-dma-alloc", dma_alloc);
     feval("['] ppc-dma-alloc to (dma-alloc)");
@@ -660,6 +710,14 @@ arch_of_init(void)
 
     push_str("/chosen");
     fword("find-device");
+
+    push_str(xbox360_scanout_info);
+    fword("encode-string");
+    push_str("xbox360-inherited-scanout");
+    fword("property");
+
+    printk("Xenos inherited scanout: %s; using %ux%u\n", xbox360_scanout_info,
+           xbox360_video_width, xbox360_video_height);
 
     push_str(stdin_path);
     fword("pathres-resolve-aliases");

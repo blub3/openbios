@@ -22,10 +22,10 @@ fcode-version3
   then
 ;
 
-h# 500 constant xenos-video-width
-h# 2D0 constant xenos-video-height
+h# 500 value xenos-video-width
+h# 2D0 value xenos-video-height
 h# 20 constant xenos-depth-bits
-h# 1400 constant xenos-line-bytes
+: xenos-line-bytes xenos-video-width 4 * ;
 
 
 " openbios-video-width" (find-xt) cell+ value openbios-video-width-xt
@@ -93,13 +93,22 @@ headerless
   default-font set-font
 
   frame-buffer-adr encode-int " address" property
-  frame-buffer-adr encode-int h# 384000 encode-int encode+ " AAPL,vram-memory" property
+  frame-buffer-adr encode-int xenos-line-bytes xenos-video-height * encode-int encode+ " AAPL,vram-memory" property
 
   xenos-video-width xenos-video-height over char-width / over char-height /
   fb8-install
 ;
 
 : xenos-driver-init
+  " xenon-boot-1080p?" (find-xt) dup -1 = if
+    drop
+  else
+    execute if
+      h# 780 to xenos-video-width
+      h# 438 to xenos-video-height
+    then
+  then
+
   \ Set the dictionary properties for the video system.
   xenos-video-height openbios-video-height-xt !
   xenos-video-width openbios-video-width-xt !

@@ -28,6 +28,9 @@
 #define XBOX360_CPU_NAME            "PowerPC,Xenon"
 #define XBOX360_RAM_TYPE            "GDDR3"
 
+extern unsigned int xbox360_video_width;
+extern unsigned int xbox360_video_height;
+
 #include "kernel.h"
 
 #endif

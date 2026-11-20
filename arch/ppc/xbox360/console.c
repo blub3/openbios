@@ -154,9 +154,8 @@ xbox360_putchar(int c)
 	unsigned char v;
 
 	if (!init) {
-		// TODO: Get resolution dynamically.
-		screen_width = 1280;
-		screen_height = 720;
+		screen_width = xbox360_video_width;
+		screen_height = xbox360_video_height;
 		xbox360_clearscreen();
 		init = 1;
 	}
