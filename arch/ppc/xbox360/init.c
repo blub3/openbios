@@ -131,15 +131,76 @@ typedef union {
 } xbox360_smc_msg;
 
 static void
-xbox360_smc_write(xbox360_smc_msg *msg)
+xbox360_smc_write_ready(xbox360_smc_msg *msg)
 {
-    while ((in_le32((volatile unsigned int*)(XBOX360_SMC_BASE + 0x84)) & 0x4) == 0);
-
     out_le32((volatile unsigned int*)(XBOX360_SMC_BASE + 0x84), 0x4);
     for (int i = 0; i < 4; i++) {
         out_be32((volatile unsigned int*)(XBOX360_SMC_BASE + 0x80), msg->data32[i]);
     }
     out_le32((volatile unsigned int*)(XBOX360_SMC_BASE + 0x84), 0x0);
+}
+
+static void
+xbox360_smc_write(xbox360_smc_msg *msg)
+{
+    while ((in_le32((volatile unsigned int*)(XBOX360_SMC_BASE + 0x84)) & 0x4) == 0);
+    xbox360_smc_write_ready(msg);
+}
+
+/*
+ * Configure HDMI stereo PCM through the same SMC I2C interface used by
+ * Free60 libxenon (libxenon/drivers/xenon_sound/sound.c). Run only on
+ * request, with an HDMI display attached, before starting Mac OS X.
+ */
+static void
+xbox360_hdmi_audio(void)
+{
+    static const struct {
+        uint8_t reg;
+        uint8_t value;
+    } setup[] = {
+        { 0x14, 0x11 }, { 0x02, 0x03 }, { 0x03, 0x00 },
+        { 0x04, 0x18 }, { 0x05, 0x00 }, { 0x1d, 0x40 },
+        { 0x21, 0x02 }, { 0x22, 0x2b }, { 0x2f, 0x01 },
+        { 0x3e, 0x3f }, { 0xdf, 0x10 }
+    };
+    volatile unsigned int *send_status = (volatile unsigned int *)(XBOX360_SMC_BASE + 0x84);
+    volatile unsigned int *recv_status = (volatile unsigned int *)(XBOX360_SMC_BASE + 0x94);
+    volatile unsigned int *recv_data = (volatile unsigned int *)(XBOX360_SMC_BASE + 0x90);
+
+    for (unsigned int i = 0; i < sizeof(setup) / sizeof(setup[0]); i++) {
+        xbox360_smc_msg msg = { .data = { 0x11, 0x20, 0, 0xbd, 0, 0,
+                                         setup[i].reg, setup[i].value } };
+        unsigned int ms;
+
+        for (ms = 0; ms < 100 && !(in_le32(send_status) & 0x4); ms++) {
+            mdelay(1);
+        }
+        if (ms == 100) {
+            printk("HDMI audio: SMC send timeout at register %02x\n", setup[i].reg);
+            return;
+        }
+        xbox360_smc_write_ready(&msg);
+
+        for (ms = 0; ms < 100; ms++) {
+            if (in_le32(recv_status) & 0x4) {
+                out_le32(recv_status, 0x4);
+                for (unsigned int word = 0; word < 4; word++) {
+                    msg.data32[word] = in_be32(recv_data);
+                }
+                out_le32(recv_status, 0);
+                if (msg.data[0] == 0x11) {
+                    break;
+                }
+            }
+            mdelay(1);
+        }
+        if (ms == 100 || msg.data[1] != 0) {
+            printk("HDMI audio: SMC response failed at register %02x\n", setup[i].reg);
+            return;
+        }
+    }
+    printk("HDMI audio: transmitter setup complete\n");
 }
 
 static void
@@ -538,6 +599,8 @@ arch_of_init(void)
     openbios_init();
     modules_init();
     setup_timers();
+
+    bind_func("xenon-hdmi-audio", xbox360_hdmi_audio);
 
     bind_func("ppc-dma-alloc", dma_alloc);
     feval("['] ppc-dma-alloc to (dma-alloc)");

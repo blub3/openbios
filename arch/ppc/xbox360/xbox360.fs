@@ -95,6 +95,8 @@ variable keyboard-phandle 0 keyboard-phandle !
 \ Boot the tested SSD directly, without relying on HFS blessing metadata.
 \ Keep the boot stick and SSD in their tested ports (SSD alias ud1).
 : mac-boot
+  \ The experimental HDMI transmitter setup runs before both manual and automatic SSD boot.
+  s" xenon-hdmi-audio" evaluate
   0 state-valid !
   0 !load-size
   s" boot ud1:,\System\Library\CoreServices\BootX" evaluate
