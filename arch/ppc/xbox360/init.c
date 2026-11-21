@@ -230,16 +230,30 @@ xbox360_hdmi_audio(void)
         { 0x21, 0x02 }, { 0x22, 0x2b }, { 0x2f, 0x01 },
         { 0x3e, 0x3f }, { 0xdf, 0x10 }
     };
-    for (unsigned int i = 0; i < sizeof(setup) / sizeof(setup[0]); i++) {
-        uint8_t value = setup[i].value;
-        if (xbox360_video_width == 1920 && setup[i].reg == 0x14)
-            value = 0x03; /* Captured 1080p HDMI value. */
-        if (!xbox360_hdmi_write(setup[i].reg, value)) {
-            printk("HDMI audio: SMC write failed at register %02x\n", setup[i].reg);
-            return;
-        }
+    char result[80];
+    uint8_t readback;
+    unsigned int i;
+
+    /*
+     * Use the known working audio enable command after mode setting.
+     * The value observed in a running transmitter is a readback, and
+     * may not trigger the same operation when written.
+     */
+    for (i = 0; i < sizeof(setup) / sizeof(setup[0]); i++)
+        if (!xbox360_hdmi_write(setup[i].reg, setup[i].value))
+            break;
+
+    if (i < sizeof(setup) / sizeof(setup[0])) {
+        snprintf(result, sizeof(result), "SMC write failed at register 02%02x", setup[i].reg);
+    } else if (xbox360_hdmi_read(0x14, &readback)) {
+        snprintf(result, sizeof(result), "transmitter setup complete; HDMI 0214 wrote 11, read %02x", readback);
+    } else {
+        snprintf(result, sizeof(result), "transmitter setup complete; HDMI 0214 read failed");
     }
-    printk("HDMI audio: transmitter setup complete\n");
+    phandle_t chosen = find_dev("/chosen");
+    if (chosen)
+        set_property(chosen, "xbox360-hdmi-audio-test", result, strlen(result) + 1);
+    printk("HDMI audio: %s\n", result);
 }
 
 static void
