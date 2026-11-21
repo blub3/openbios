@@ -153,7 +153,9 @@ xbox360_putchar(int c)
 	const unsigned char *char_ptr;
 	unsigned char v;
 
-	if (!init) {
+	if (!init || screen_width != xbox360_video_width) {
+		current_x = 10;
+		current_y = 10;
 		screen_width = xbox360_video_width;
 		screen_height = xbox360_video_height;
 		xbox360_clearscreen();
