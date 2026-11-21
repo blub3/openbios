@@ -38,6 +38,7 @@
 #include "arch/ppc/processor.h"
 
 #include "../../drivers/timer.h" // TODO
+#include "NativeHDMI.h"
 
 
 extern void unexpected_excep(int vector, unsigned long nip, unsigned long status);
@@ -284,6 +285,7 @@ xbox360_poweroff(void)
 unsigned int xbox360_video_width = 1280;
 unsigned int xbox360_video_height = 720;
 static char xbox360_scanout_info[120];
+static XenonHDMIProfiles native_hdmi;
 
 static uint32_t
 xbox360_gpu_read(unsigned int reg)
@@ -370,6 +372,16 @@ static const char *xbox360_try_1080p(void)
         if (!xbox360_hdmi_read(hdmi[i].reg, &old_hdmi[i]))
             return "skipped: could not save HDMI settings";
 
+    /* Save the original timing while XeLL's 720p HDMI output is active. */
+    for (unsigned int i = 0; i < sizeof(ana) / sizeof(ana[0]); i++) {
+        native_hdmi.mode720.ana[i] = old_ana[i];
+        native_hdmi.mode1080.ana[i] = ana[i].value;
+    }
+    for (unsigned int i = 0; i < sizeof(timing) / sizeof(timing[0]); i++) {
+        native_hdmi.mode720.timing[i] = xbox360_gpu_read(timing[i].reg);
+        native_hdmi.mode1080.timing[i] = timing[i].value;
+    }
+
     /* Disable the transmitter before changing its PLL and digital timing. */
     if (!xbox360_ana_write(0, 0))
         goto restore;
@@ -412,6 +424,8 @@ static const char *xbox360_try_1080p(void)
 
     xbox360_video_width = 1920;
     xbox360_video_height = 1080;
+    native_hdmi.control = control;
+    native_hdmi.version = XENON_NATIVE_HDMI_VERSION;
     return "programmed experimental 1080p60";
 
 restore:
@@ -881,6 +895,9 @@ arch_of_init(void)
     push_str("xbox360-mode-test");
     fword("property");
 
+    if (native_hdmi.version)
+        set_property(find_dev("/chosen"), XENON_NATIVE_HDMI_PROPERTY,
+                     (char *)&native_hdmi, sizeof(native_hdmi));
 
     printk("Xenos inherited scanout: %s; using %ux%u\n", xbox360_scanout_info,
            xbox360_video_width, xbox360_video_height);
