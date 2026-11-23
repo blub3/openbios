@@ -18,7 +18,7 @@
 #include "macosx.h"
 #include "mkext.h"
 
-#define MKEXT_FILENAME      "Xbox360.mkext"
+#define MKEXT_FILENAME      "NativeHD.mkext"
 
 static phandle_t
 obp_devopen(const char *path)
