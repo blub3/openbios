@@ -11,6 +11,7 @@ This experimental fork of [osx360/openbios](https://github.com/osx360/openbios) 
 | Tiger SSD autoboot | Aurora → XeLL → OpenBIOS reached the desktop from an SSD cloned from a Power Mac G5 running Tiger 10.4.11 (8S165). A five-second keyboard cancellation window and a `mac-boot` command are available at the OpenBIOS stage. |
 | Native HDMI | OpenBIOS supplies the Slim's captured 720p timing and the native 1080p timing to Tiger. With the companion drivers, the TV confirmed both modes and audio played in both. |
 | Xenos scanout | Separate firmware builds reserve scanout storage for double buffering and queued triple buffering. The driver tests verified ordered VBlank flips, with zero dropped or out-of-order frames in the queued test. |
+| WindowServer test profiles | `WINAUTO.ELF` and `WINOVR.ELF` cold-booted Tiger with their matching driver archives. The overlapping profile passed two unarmed moves with eight ordered GPU fences per move and complete clipped and on-screen pixel checks. Quartz Extreme remains disabled. [Firmware prerelease](https://github.com/blub3/openbios/releases/tag/gpu-fw-windowserver) |
 
 The Tiger DVD installer can see and format the USB SSD. Direct installation from DVD to that SSD remains open. The EHCI path is scoped to directly attached Bulk-Only Transport devices. EHCI hub transactions, periodic transfers, UAS and hotplug are outside the implemented path. [Hardware results](Documentation/xbox360/hardware-results.md) · [USB 2.0 implementation notes](Documentation/xbox360/usb2-bringup.md)
 
@@ -21,7 +22,7 @@ The Tiger DVD installer can see and format the USB SSD. Direct installation from
 
 | Firmware source tag | Use |
 | --- | --- |
-| [`gpu-fw-native-hdmi`](https://github.com/blub3/openbios/tree/gpu-fw-native-hdmi) | Native HDMI test and the base ELF for GPU profiles that substitute the archive name, including `WINTILE.ELF`. |
+| [`gpu-fw-native-hdmi`](https://github.com/blub3/openbios/tree/gpu-fw-native-hdmi) | Native HDMI test and the base ELF for archive-name variants, including `WINTILE.ELF`, `WINAUTO.ELF` and `WINOVR.ELF`. |
 | [`gpu-fw-vblank-reserve`](https://github.com/blub3/openbios/tree/gpu-fw-vblank-reserve) | Double-buffered scanout retry. |
 | [`gpu-fw-vblank-queue`](https://github.com/blub3/openbios/tree/gpu-fw-vblank-queue) | Triple-buffered scanout with queued VBlank flips. |
 
