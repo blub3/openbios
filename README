@@ -1,7 +1,7 @@
-Xbox 360 experimental USB storage fork
---------------------------------------
-See README.md for this fork's scope, tested results, credits and build instructions.
-Based on https://github.com/osx360/openbios; original introduction follows.
+OpenBIOS for OSX360
+------------------
+See README.md for the Xbox 360 fork, hardware results and build instructions.
+The original OpenBIOS introduction follows.
 
 Welcome to OpenBIOS
 -------------------

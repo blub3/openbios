@@ -1,58 +1,41 @@
-# OpenBIOS for Xbox 360: experimental EHCI and SSD boot
+# OpenBIOS for OSX360
 
-An unofficial development fork of **[osx360/openbios](https://github.com/osx360/openbios)**,
-itself based on [OpenBIOS](https://github.com/openbios/openbios).
-The Xbox 360 port and Mac OS X boot support were created upstream; this work
-extends their USB storage and boot paths. It is not an official osx360 release.
+This experimental fork of [osx360/openbios](https://github.com/osx360/openbios) extends the original Xbox 360 port of [OpenBIOS](https://github.com/openbios/openbios), the IEEE 1275 Open Firmware implementation. The upstream [OSX360 project](https://github.com/osx360) provides the Xbox 360 firmware port and Mac OS X boot support. This fork adds USB 2.0 storage, Tiger SSD autoboot and firmware handoffs for native HDMI and Xenos GPU tests.
 
-## What this fork adds
+## What's working
 
-- Experimental EHCI control/bulk transfers for directly connected high-speed
-  USB Bulk-Only Transport storage, with explicit Xenon endian/cache handling.
-- Per-port OHCI fallback for unsupported device classes, preserving keyboard
-  support in the tested wired Apple keyboard configuration.
-- Distinct USB disk paths and numbered aliases, model/capacity/link-speed
-  output, and driver-package lookup across USB disk aliases.
-- Automatic boot through XeLL → OpenBIOS → Mac OS X on the tested SSD,
-  with a five-second keyboard cancellation window and a `mac-boot` command.
-- Host simulations covering transfer handling, handoff and keyboard startup.
+| Area | Verified result |
+| --- | --- |
+| USB 2.0 storage | On an Xbox 360 Trinity, a directly attached SanDisk boot stick and an Intenso 120 GB SSD in a USB enclosure negotiated EHCI at 480 Mbit/s and received distinct disk paths. The figure is the negotiated link speed. |
+| Keyboard fallback | The tested wired Apple keyboard worked through OHCI fallback while the two drives used EHCI. |
+| Tiger SSD autoboot | Aurora → XeLL → OpenBIOS reached the desktop from an SSD cloned from a Power Mac G5 running Tiger 10.4.11 (8S165). A five-second keyboard cancellation window and a `mac-boot` command are available at the OpenBIOS stage. |
+| Native HDMI | OpenBIOS supplies the Slim's captured 720p timing and the native 1080p timing to Tiger. With the companion drivers, the TV confirmed both modes and audio played in both. |
+| Xenos scanout | Separate firmware builds reserve scanout storage for double buffering and queued triple buffering. The driver tests verified ordered VBlank flips, with zero dropped or out-of-order frames in the queued test. |
 
-## Hardware-tested status
+The Tiger DVD installer can see and format the USB SSD. Direct installation from DVD to that SSD remains open. The EHCI path is scoped to directly attached Bulk-Only Transport devices. EHCI hub transactions, periodic transfers, UAS and hotplug are outside the implemented path. [Hardware results](Documentation/xbox360/hardware-results.md) · [USB 2.0 implementation notes](Documentation/xbox360/usb2-bringup.md)
 
-On the contributor's Xbox 360 Trinity, a SanDisk USB stick and an Intenso
-120 GB SATA SSD in a USB enclosure enumerate on EHCI at **480 Mbit/s**.
-That is negotiated link speed, not a measured transfer rate. The wired
-aluminum Apple keyboard works through OHCI. Distinct `disk@1` and `disk@2`
-nodes appear under the EHCI controller.
+## Branches and firmware tags
 
-Mac OS X Tiger **10.4.11 (8S165)**, cloned from a Power Mac G5 with Carbon Copy
-Cloner, reaches the desktop from the USB SSD. Automatic boot when launching
-XeLL from Aurora has also been confirmed by the hardware tester.
+- [`codex/usb2-ssd-boot`](https://github.com/blub3/openbios/tree/codex/usb2-ssd-boot) is the default branch. It includes the native HDMI timing handoff and uses the standard `Xbox360.mkext` name.
+- [`gpu/quartz-extreme`](https://github.com/blub3/openbios/tree/gpu/quartz-extreme) records the firmware sources and archive names used by the GPU test profiles. Quartz Extreme status is tracked in the companion drivers repository. [Firmware profile guide](https://github.com/blub3/openbios/blob/gpu/quartz-extreme/Documentation/xbox360-gpu-profiles.md) · [Driver milestone tracker](https://github.com/blub3/osx360-drivers/blob/gpu/quartz-extreme/docs/gpu-milestones.md)
 
-The Tiger DVD installer starts and can see/format the SSD, but rejected it
-as an installation target. Direct installation from DVD is **not solved**.
-Networking and SSH have worked, but intermittent connectivity remains
-unresolved; a network-driver crash has not been established.
-
-See [hardware results](Documentation/xbox360/hardware-results.md) for the
-scope of these observations and [implementation notes](Documentation/xbox360/usb2-bringup.md)
-for limitations. There is no EHCI hub/split-transaction, periodic-transfer,
-UAS or hotplug implementation. Other Xbox revisions and USB devices need testing.
+| Firmware source tag | Use |
+| --- | --- |
+| [`gpu-fw-native-hdmi`](https://github.com/blub3/openbios/tree/gpu-fw-native-hdmi) | Native HDMI test and the base ELF for GPU profiles that substitute the archive name, including `WINTILE.ELF`. |
+| [`gpu-fw-vblank-reserve`](https://github.com/blub3/openbios/tree/gpu-fw-vblank-reserve) | Double-buffered scanout retry. |
+| [`gpu-fw-vblank-queue`](https://github.com/blub3/openbios/tree/gpu-fw-vblank-queue) | Triple-buffered scanout with queued VBlank flips. |
 
 ## Build and test
 
-The existing project workflow uses `ghcr.io/openbios/openbios-builder:master`.
-From the repository root, with Docker available:
+From the repository root, build the Xbox 360 PowerPC target with the project builder image and Docker.
 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src ghcr.io/openbios/openbios-builder:master sh -c './config/scripts/switch-arch xbox360-ppc && make -j2'
 ```
 
-The Xbox ELF is generated at `obj-ppc/openbios-xbox360.elf`.
-The builder tag is mutable; record its image digest and the source commit
-when producing a reproducible release.
+The build writes `obj-ppc/openbios-xbox360.elf`. Record the source commit and builder image digest alongside the ELF checksum for repeatable builds. [General OpenBIOS build notes](README)
 
-Run the host simulations with Python 3, a C compiler and sanitizer support:
+Run the host simulations with Python 3 and a C compiler with sanitizer support. These exercise selected firmware paths using mocked hardware. Real DMA, cache behavior and OS handoff are covered by console testing.
 
 ```sh
 python3 tests/ehci-transfer-test.py
@@ -60,16 +43,11 @@ python3 tests/usb-keyboard-init-test.py
 python3 tests/ehci-handoff-test.py
 ```
 
-These simulations do not replace testing real DMA/cache behavior or OS handoff.
-General upstream build documentation remains in [README](README).
+## Boot the tested USB layout
 
-## Boot configuration
+On the tested setup, XeLL launches the ELF from a FAT32 boot stick. Place `openbios-xbox360.elf` and the matching `Xbox360.mkext` at its root. Use a separate SSD with an existing Tiger system on an Apple Partition Map disk. Keep a known-working XeLL entry available when testing firmware changes. [Companion OSX360 drivers](https://github.com/blub3/osx360-drivers) · [Experimental ELF and mkext pairings](https://github.com/blub3/osx360-drivers/blob/gpu/quartz-extreme/docs/gpu-boot-profiles.md)
 
-Keep a known-working ELF for recovery. The current autoboot default is specific
-to the tested layout: boot stick first, SSD at `ud1`. Enumeration order can
-change with port/device changes. Verify aliases before relying on this default.
-
-The FAT32 boot stick's `kboot.conf` uses:
+The simple `kboot.conf` below uses the boot stick at `uda0`.
 
 ```text
 #KBOOTCONFIG
@@ -78,32 +56,14 @@ timeout=0
 openbios="uda0:/openbios-xbox360.elf"
 ```
 
-Keep the required `Xbox360.mkext` on the boot stick. Obtain the driver package
-separately from the [osx360 drivers project](https://github.com/osx360/osx360-drivers).
-Mac OS X installation media, cloned volumes and driver binaries are not supplied
-by this source repository.
-
-At the OpenBIOS countdown, any key cancels autoboot. At its prompt, `mac-boot`
-uses the explicit path below, avoiding manual backslash entry:
+The OpenBIOS countdown is separate from the XeLL menu. Press any key during the OpenBIOS countdown to reach its prompt. The tested boot stick enumerates first and the SSD appears at `ud1`. Verify the aliases if you change ports or devices. With the tested disk order, `mac-boot` runs the following command.
 
 ```text
 boot ud1:,\System\Library\CoreServices\BootX
 ```
 
-This default lives in `arch/ppc/xbox360/xbox360.fs`; it is installed on each
-startup because this target's NVRAM is RAM-only. XeLL load-address restrictions
-are a separate compatibility issue and have not been fixed here.
+The default is defined in [`xbox360.fs`](arch/ppc/xbox360/xbox360.fs) and is set on each startup because this target's NVRAM is RAM-only.
 
-## Credit and licensing
+## Credits and license
 
-Please credit and link **[osx360/openbios](https://github.com/osx360/openbios)**
-when sharing this work. The original Git history and copyright notices are
-retained. See [credits and license inventory](Documentation/xbox360/credits-and-licensing.md).
-
-The top-level [COPYING](COPYING) contains GPL version 2. Individual source
-headers and component licenses remain applicable; this fork does not relicense
-the whole tree. Our additions and hardware integration are documented in
-[the change record](Documentation/xbox360/changes.md).
-
-[Publishing guide](Documentation/xbox360/publishing.md) describes how to publish
-as a GitHub fork while retaining attribution and excluding private test material.
+Credit goes to the [OpenBIOS contributors](https://github.com/openbios/openbios) for the firmware and the [OSX360 contributors](https://github.com/osx360/openbios) for the Xbox 360 port and Mac OS X boot support. The original Git history and copyright notices are retained. The top-level [COPYING](COPYING) contains GPL version 2. Source headers and component licenses also apply. [Credits and license inventory](Documentation/xbox360/credits-and-licensing.md) · [Fork change record](Documentation/xbox360/changes.md)
