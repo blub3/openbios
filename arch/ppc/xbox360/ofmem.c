@@ -106,7 +106,7 @@ ofmem_arch_get_heap_top(void)
 ucell
 ofmem_arch_get_virt_top(void)
 {
-    return XBOX360_FB_BASE;
+    return XBOX360_RAM_SIZE_ACTUAL;
 }
 
 void
@@ -432,6 +432,9 @@ ofmem_init(void)
 	memset(ofmem, 0, sizeof(*ofmem));
 
     ofmem->ramsize = XBOX360_RAM_SIZE_ACTUAL;
+
+    /* Also block explicit physical claims of the diagnostic scanout range. */
+    ofmem_claim_phys(XBOX360_VBLANK_BASE, XBOX360_VBLANK_SIZE, 0);
 
 	ofmem_claim_phys(0, FREE_BASE_1, 0);
 	ofmem_claim_virt(0, FREE_BASE_1, 0);

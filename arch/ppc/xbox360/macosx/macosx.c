@@ -17,8 +17,9 @@
 #include "macho-loader.h"
 #include "macosx.h"
 #include "mkext.h"
+#include "../xbox360.h"
 
-#define MKEXT_FILENAME      "NativeHD.mkext"
+#define MKEXT_FILENAME      "XenosVBR.mkext"
 
 static phandle_t
 obp_devopen(const char *path)
@@ -244,12 +245,14 @@ macosx_patch(void)
     printk("New devicetree: %p, length: 0x%lx\n", xnu_boot_args->deviceTreeP, xnu_boot_args->deviceTreeLength);
 
     //
-    // Fix DRAM. XNU must not use the top 16MB, and it doesn't seem to like having the remainder all in one bank.
+    // Keep the two known-working DRAM banks. End the upper bank before
+    // the three 8 MiB ranges reserved for graphics.
     //
+    memset(xnu_boot_args->PhysicalDRAM, 0, sizeof(xnu_boot_args->PhysicalDRAM));
     xnu_boot_args->PhysicalDRAM[0].base = 0x00000000; // 0MB start
     xnu_boot_args->PhysicalDRAM[0].size = 0x02000000; // 32MB size TODO: This reduces freezes, but they still may occur.
     xnu_boot_args->PhysicalDRAM[1].base = 0x10000000; // 256MB start
-    xnu_boot_args->PhysicalDRAM[1].size = 0x0F000000; // 240MB size
+    xnu_boot_args->PhysicalDRAM[1].size = XBOX360_RAM_SIZE_ACTUAL - xnu_boot_args->PhysicalDRAM[1].base;
 
     for (int i = 0; i < kMaxDRAMBanks; i++) {
         if (xnu_boot_args->PhysicalDRAM[i].size == 0)

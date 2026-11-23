@@ -899,6 +899,11 @@ arch_of_init(void)
         set_property(find_dev("/chosen"), XENON_NATIVE_HDMI_PROPERTY,
                      (char *)&native_hdmi, sizeof(native_hdmi));
 
+    /* PowerPC device-tree cells carry the physical base and byte length. */
+    static const uint32_t vblank_surface[] = { XBOX360_VBLANK_BASE, XBOX360_VBLANK_SIZE };
+    set_property(find_dev("/chosen"), XBOX360_VBLANK_PROPERTY,
+                 (const char *)vblank_surface, sizeof(vblank_surface));
+
     printk("Xenos inherited scanout: %s; using %ux%u\n", xbox360_scanout_info,
            xbox360_video_width, xbox360_video_height);
 
