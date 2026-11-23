@@ -19,7 +19,7 @@
 #include "mkext.h"
 #include "../xbox360.h"
 
-#define MKEXT_FILENAME      "XenosVBR.mkext"
+#define MKEXT_FILENAME      "XenosVBQ.mkext"
 
 static phandle_t
 obp_devopen(const char *path)
@@ -246,7 +246,7 @@ macosx_patch(void)
 
     //
     // Keep the two known-working DRAM banks. End the upper bank before
-    // the three 8 MiB ranges reserved for graphics.
+    // the four 8 MiB ranges reserved for graphics.
     //
     memset(xnu_boot_args->PhysicalDRAM, 0, sizeof(xnu_boot_args->PhysicalDRAM));
     xnu_boot_args->PhysicalDRAM[0].base = 0x00000000; // 0MB start

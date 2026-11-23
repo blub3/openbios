@@ -15,7 +15,7 @@
 #define XBOX360_RAM_SIZE            0x20000000
 #define XBOX360_FB_SIZE             0x1000000 // Direct framebuffer + space for bounce buffer used in XNU (8MB x2, good for 1920x1080x32)
 #define XBOX360_FB_BASE             (XBOX360_RAM_SIZE - XBOX360_FB_SIZE)
-#define XBOX360_VBLANK_SIZE         0x00800000
+#define XBOX360_VBLANK_SIZE         0x01000000
 #define XBOX360_VBLANK_BASE         (XBOX360_FB_BASE - XBOX360_VBLANK_SIZE)
 #define XBOX360_VBLANK_PROPERTY     "xbox360-vblank-scanout"
 #define XBOX360_RAM_SIZE_ACTUAL     XBOX360_VBLANK_BASE
