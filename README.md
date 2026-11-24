@@ -12,6 +12,7 @@ This experimental fork of [osx360/openbios](https://github.com/osx360/openbios) 
 | Native HDMI | OpenBIOS supplies the Slim's captured 720p timing and the native 1080p timing to Tiger. With the companion drivers, the TV confirmed both modes and audio played in both. |
 | Xenos scanout | Separate firmware builds reserve scanout storage for double buffering and queued triple buffering. The driver tests verified ordered VBlank flips, with zero dropped or out-of-order frames in the queued test. |
 | WindowServer test profiles | `WINAUTO.ELF` and `WINOVR.ELF` cold-booted Tiger with their matching driver archives. The overlapping profile passed two unarmed moves with eight ordered GPU fences per move and complete clipped and on-screen pixel checks. Quartz Extreme remains disabled. [Firmware prerelease](https://github.com/blub3/openbios/releases/tag/gpu-fw-windowserver) |
+| SMP groundwork | XeLL enters the image with threads 1–5 at offset `0x60`, and this firmware parks them there in a `b .` loop. Because OpenBIOS is linked at `0x07E00000`, outside Tiger's memory, the five threads stay parked and reachable after boot. The OSX360 drivers' SMP work turns this loop into a release mailbox and runs Tiger on two hardware threads with no firmware change. Measurements showed XeLL leaves all six threads with identical HID, LPCR and HRMOR settings and synchronized time bases. [SMP design](https://github.com/blub3/osx360-drivers/blob/claude/smp/docs/smp-design.md) |
 
 The Tiger DVD installer can see and format the USB SSD. Direct installation from DVD to that SSD remains open. The EHCI path is scoped to directly attached Bulk-Only Transport devices. EHCI hub transactions, periodic transfers, UAS and hotplug are outside the implemented path. [Hardware results](Documentation/xbox360/hardware-results.md) · [USB 2.0 implementation notes](Documentation/xbox360/usb2-bringup.md)
 
@@ -19,6 +20,7 @@ The Tiger DVD installer can see and format the USB SSD. Direct installation from
 
 - [`codex/usb2-ssd-boot`](https://github.com/blub3/openbios/tree/codex/usb2-ssd-boot) is the default branch. It includes the native HDMI timing handoff and uses the standard `Xbox360.mkext` name.
 - [`gpu/quartz-extreme`](https://github.com/blub3/openbios/tree/gpu/quartz-extreme) records the firmware sources and archive names used by the GPU test profiles. Quartz Extreme status is tracked in the companion drivers repository. [Firmware profile guide](https://github.com/blub3/openbios/blob/gpu/quartz-extreme/Documentation/xbox360-gpu-profiles.md) · [Driver milestone tracker](https://github.com/blub3/osx360-drivers/blob/gpu/quartz-extreme/docs/gpu-milestones.md)
+- [`claude/smp`](https://github.com/blub3/openbios/tree/claude/smp) is the base for SMP firmware work. Two-thread SMP currently needs no firmware change.
 
 | Firmware source tag | Use |
 | --- | --- |
@@ -67,4 +69,4 @@ The default is defined in [`xbox360.fs`](arch/ppc/xbox360/xbox360.fs) and is set
 
 ## Credits and license
 
-Credit goes to the [OpenBIOS contributors](https://github.com/openbios/openbios) for the firmware and the [OSX360 contributors](https://github.com/osx360/openbios) for the Xbox 360 port and Mac OS X boot support. The original Git history and copyright notices are retained. The top-level [COPYING](COPYING) contains GPL version 2. Source headers and component licenses also apply. [Credits and license inventory](Documentation/xbox360/credits-and-licensing.md) · [Fork change record](Documentation/xbox360/changes.md)
+Credit goes to the [OpenBIOS contributors](https://github.com/openbios/openbios) for the firmware and the [OSX360 contributors](https://github.com/osx360/openbios) for the Xbox 360 port and Mac OS X boot support. The original Git history and copyright notices are retained. The top-level [COPYING](COPYING) contains GPL version 2. Source headers and component licenses also apply. [Credits and license inventory](Documentation/xbox360/credits-and-licensing.md) · [Fork change record](Documentation/xbox360/changes.md) The SMP findings on this firmware were made by [blub3](https://github.com/blub3) together with Claude.
